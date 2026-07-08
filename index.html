@@ -12,6 +12,7 @@
 <script src="https://www.gstatic.com/firebasejs/12.15.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/12.15.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
 <style>
   html, body { margin: 0; padding: 0; background: #0B0E17; color: #E8ECF5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
@@ -85,6 +86,8 @@ const LogOut = makeIcon(<><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><po
 const Lock = makeIcon(<><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></>);
 const Eye = makeIcon(<><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/></>);
 const EyeOff = makeIcon(<><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 11 8 11 8a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 1 12s4 8 11 8a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></>);
+const Share2 = makeIcon(<><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></>);
+const Camera = makeIcon(<><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="4"/></>);
 
 /* ============================================================
    Minimal chart engine (replaces recharts so the file has zero
@@ -799,6 +802,22 @@ function GlobalStyle() {
 
         .edm-table th, .edm-table td { padding:8px 10px; font-size:12.5px; }
         h1.font-display[style], h2.font-display[style] { font-size:18px !important; }
+
+        /* Shrink cards, metrics and buttons so nothing overflows a phone width */
+        .edm-card[style*="padding: 16px 18px"] { padding:12px 14px !important; }
+        .edm-card .font-display[style*="fontSize: 24"],
+        .edm-card .font-display[style*="fontSize:24"] { font-size:19px !important; }
+        .edm-btn { font-size:12.5px; padding:7px 11px; }
+        .edm-tab { padding:7px 12px; font-size:12.5px; }
+        .edm-label { font-size:11px; }
+        .payslip-header-logo { width:40px !important; height:40px !important; }
+      }
+
+      /* Very small phones: tighten further */
+      @media (max-width: 400px) {
+        .edm-main[style] { padding:12px 10px !important; }
+        .edm-card { border-radius:10px; }
+        .edm-table th, .edm-table td { padding:7px 8px; font-size:12px; }
       }
     `}</style>
   );
@@ -1318,6 +1337,37 @@ function DailyEntryPage({ employees, entries, setEntries, empById, rates }) {
 
   const { toast, showUndo, dismiss } = useUndoToast();
 
+  const reportRef = useRef(null);
+  const [isSharing, setIsSharing] = useState(false);
+  const dateLabel = fromISO(date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+
+  const shareReport = () => {
+    if (!reportRef.current || isSharing || typeof html2canvas === 'undefined') return;
+    setIsSharing(true);
+    html2canvas(reportRef.current, {
+      backgroundColor: '#ffffff',
+      scale: 2,
+      ignoreElements: (el) => el.classList && el.classList.contains('no-print'),
+    }).then((canvas) => {
+      canvas.toBlob((blob) => {
+        if (!blob) { setIsSharing(false); return; }
+        const fileName = `daily-report-${date}${company !== 'All' ? '-' + company.replace(/\s+/g, '') : ''}.png`;
+        const file = new File([blob], fileName, { type: 'image/png' });
+        const finish = () => setIsSharing(false);
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          navigator.share({ files: [file], title: 'Daily delivery report', text: `Daily delivery report — ${dateLabel}` })
+            .catch(() => {}).finally(finish);
+        } else {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = fileName; document.body.appendChild(a); a.click(); a.remove();
+          URL.revokeObjectURL(url);
+          finish();
+        }
+      }, 'image/png');
+    }).catch(() => setIsSharing(false));
+  };
+
   const upsertEntry = (form) => {
     const assigned = Number(form.assigned) || 0;
     const delivered = Math.min(assigned, Number(form.delivered) || 0);
@@ -1353,7 +1403,14 @@ function DailyEntryPage({ employees, entries, setEntries, empById, rates }) {
       <SectionHeader
         title="Daily delivery entry"
         subtitle="Record each employee's deliveries for the day — reports update automatically"
-        right={<button className="edm-btn edm-btn-amber" onClick={() => setModal({ mode: 'add' })}><Plus size={15} /> Add entry</button>}
+        right={
+          <div className="no-print" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="edm-btn edm-btn-ghost" disabled={isSharing} onClick={shareReport}>
+              <Share2 size={15} /> {isSharing ? 'Preparing…' : 'Share / export report'}
+            </button>
+            <button className="edm-btn edm-btn-amber" onClick={() => setModal({ mode: 'add' })}><Plus size={15} /> Add entry</button>
+          </div>
+        }
       />
 
       <div className="edm-card" style={{ padding: 14, display: 'flex', gap: 14, alignItems: 'flex-end', marginBottom: 16, flexWrap: 'wrap' }}>
@@ -1373,36 +1430,55 @@ function DailyEntryPage({ employees, entries, setEntries, empById, rates }) {
         </div>
       </div>
 
-      <div className="edm-card edm-scroll" style={{ overflowX: 'auto' }}>
-        <table className="edm-table">
-          <thead><tr>
-            <th>Employee</th><th>Company</th><th>Assigned</th><th>Delivered</th><th>Failed</th><th>Success %</th><th>Remarks</th><th></th>
-          </tr></thead>
-          <tbody>
-            {dayEntries.map((en) => {
-              const emp = empById[en.employeeId];
-              const rate = en.assigned ? (en.delivered / en.assigned) * 100 : 0;
-              return (
-                <tr key={en.id}>
-                  <td style={{ fontWeight: 600 }}>{emp ? emp.name : 'Unknown'}</td>
-                  <td>{en.company}</td>
-                  <td className="font-mono">{en.assigned}</td>
-                  <td className="font-mono" style={{ color: 'var(--teal-dark)' }}>{en.delivered}</td>
-                  <td className="font-mono" style={{ color: 'var(--danger)' }}>{en.failed}</td>
-                  <td className="font-mono">{pct(rate)}</td>
-                  <td style={{ color: 'var(--text-muted)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }}>{en.remarks || '—'}</td>
-                  <td>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <button className="edm-btn edm-btn-ghost" style={{ padding: 6 }} onClick={() => setModal({ mode: 'edit', entry: en })}><Pencil size={13} /></button>
-                      <button className="edm-btn edm-btn-danger-ghost" style={{ padding: 6 }} onClick={() => setDeleteId(en.id)}><Trash2 size={13} /></button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-            {dayEntries.length === 0 && <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 24 }}>No entries recorded for this date yet.</td></tr>}
-          </tbody>
-        </table>
+      <div ref={reportRef} style={{ background: '#fff' }}>
+        <div className="edm-card" style={{ padding: 16, borderRadius: '12px 12px 0 0', borderBottom: 'none' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <img src={LOGO_DATA_URI} alt="" style={{ width: 32, height: 32, objectFit: 'contain', flexShrink: 0 }} />
+              <div>
+                <div className="font-display" style={{ fontSize: 16, fontWeight: 700 }}>{COMPANY_NAME}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Daily delivery report — {dateLabel}{company !== 'All' ? ` · ${company}` : ''}</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 12.5 }}>
+              <div><span style={{ color: 'var(--text-muted)' }}>Assigned </span><span className="font-mono" style={{ fontWeight: 700 }}>{dayAgg.assigned}</span></div>
+              <div><span style={{ color: 'var(--text-muted)' }}>Delivered </span><span className="font-mono" style={{ fontWeight: 700, color: 'var(--teal-dark)' }}>{dayAgg.delivered}</span></div>
+              <div><span style={{ color: 'var(--text-muted)' }}>Failed </span><span className="font-mono" style={{ fontWeight: 700, color: 'var(--danger)' }}>{dayAgg.failed}</span></div>
+              <div><span style={{ color: 'var(--text-muted)' }}>Success </span><span className="font-mono" style={{ fontWeight: 700 }}>{pct(dayAgg.successRate)}</span></div>
+            </div>
+          </div>
+        </div>
+        <div className="edm-card edm-scroll" style={{ overflowX: 'auto', borderRadius: '0 0 12px 12px' }}>
+          <table className="edm-table">
+            <thead><tr>
+              <th>Employee</th><th>Company</th><th>Assigned</th><th>Delivered</th><th>Failed</th><th>Success %</th><th>Remarks</th><th className="no-print"></th>
+            </tr></thead>
+            <tbody>
+              {dayEntries.map((en) => {
+                const emp = empById[en.employeeId];
+                const rate = en.assigned ? (en.delivered / en.assigned) * 100 : 0;
+                return (
+                  <tr key={en.id}>
+                    <td style={{ fontWeight: 600 }}>{emp ? emp.name : 'Unknown'}</td>
+                    <td>{en.company}</td>
+                    <td className="font-mono">{en.assigned}</td>
+                    <td className="font-mono" style={{ color: 'var(--teal-dark)' }}>{en.delivered}</td>
+                    <td className="font-mono" style={{ color: 'var(--danger)' }}>{en.failed}</td>
+                    <td className="font-mono">{pct(rate)}</td>
+                    <td style={{ color: 'var(--text-muted)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }}>{en.remarks || '—'}</td>
+                    <td className="no-print">
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button className="edm-btn edm-btn-ghost" style={{ padding: 6 }} onClick={() => setModal({ mode: 'edit', entry: en })}><Pencil size={13} /></button>
+                        <button className="edm-btn edm-btn-danger-ghost" style={{ padding: 6 }} onClick={() => setDeleteId(en.id)}><Trash2 size={13} /></button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {dayEntries.length === 0 && <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 24 }}>No entries recorded for this date yet.</td></tr>}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {(modal?.mode === 'add' || modal?.mode === 'edit') && (
@@ -1679,13 +1755,15 @@ function PayslipsTab({ employees, entries, rates }) {
   const [customEnd, setCustomEnd] = useState(toISO(today()));
   const [employeeId, setEmployeeId] = useState(employees[0]?.id || '');
   const [companyFilter, setCompanyFilter] = useState('All');
+  const [statusFilter, setStatusFilter] = useState('All');
 
-  const list = employees.filter((e) => companyFilter === 'All' || e.company === companyFilter);
+  const list = employees.filter((e) => (companyFilter === 'All' || e.company === companyFilter) && (statusFilter === 'All' || e.status === statusFilter));
+  const inactiveCount = employees.filter((e) => e.status === 'Inactive').length;
   const employee = list.find((e) => e.id === employeeId) || list[0];
 
   useEffect(() => {
     if (list.length && !list.find((e) => e.id === employeeId)) setEmployeeId(list[0].id);
-  }, [companyFilter]);
+  }, [companyFilter, statusFilter]);
 
   // Resolve the active [start, end] range and a display label based on the chosen period type.
   let start, end;
@@ -1719,6 +1797,15 @@ function PayslipsTab({ employees, entries, rates }) {
           ))}
         </div>
 
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span className="edm-label" style={{ marginBottom: 0 }}>Status</span>
+          {['All', 'Active', 'Inactive'].map((s) => (
+            <button key={s} className={`edm-btn ${statusFilter === s ? 'edm-btn-primary' : 'edm-btn-ghost'}`} onClick={() => setStatusFilter(s)}>
+              {s}{s === 'Inactive' && inactiveCount > 0 ? ` (${inactiveCount})` : ''}
+            </button>
+          ))}
+        </div>
+
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
           <div>
             <label className="edm-label">Company</label>
@@ -1730,7 +1817,7 @@ function PayslipsTab({ employees, entries, rates }) {
           <div>
             <label className="edm-label">Employee</label>
             <select className="edm-select" value={employee?.id || ''} onChange={(e) => setEmployeeId(e.target.value)}>
-              {list.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+              {list.map((e) => <option key={e.id} value={e.id}>{e.name}{e.status === 'Inactive' ? ' (inactive)' : ''}</option>)}
             </select>
           </div>
 
@@ -1857,9 +1944,11 @@ function SalaryPage({ employees, entries, rates }) {
   const [customStart, setCustomStart] = useState(toISO(today()));
   const [customEnd, setCustomEnd] = useState(toISO(today()));
   const [companyFilter, setCompanyFilter] = useState('All');
+  const [statusFilter, setStatusFilter] = useState('All');
 
   const [start, end] = getRange(preset, customStart, customEnd);
-  const list = employees.filter((e) => companyFilter === 'All' || e.company === companyFilter);
+  const list = employees.filter((e) => (companyFilter === 'All' || e.company === companyFilter) && (statusFilter === 'All' || e.status === statusFilter));
+  const inactiveCount = employees.filter((e) => e.status === 'Inactive').length;
 
   const rows = list.map((e) => {
     const es = entries.filter((en) => en.employeeId === e.id && inRange(en.date, start, end));
@@ -1893,6 +1982,15 @@ function SalaryPage({ employees, entries, rates }) {
         employeeFilter="All" setEmployeeFilter={() => {}} employees={[]} showEmployee={false}
         companyFilter={companyFilter} setCompanyFilter={setCompanyFilter} />
 
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span className="edm-label" style={{ marginBottom: 0 }}>Employee status</span>
+        {['All', 'Active', 'Inactive'].map((s) => (
+          <button key={s} className={`edm-btn ${statusFilter === s ? 'edm-btn-primary' : 'edm-btn-ghost'}`} onClick={() => setStatusFilter(s)}>
+            {s}{s === 'Inactive' && inactiveCount > 0 ? ` (${inactiveCount})` : ''}
+          </button>
+        ))}
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: 14, marginBottom: 20 }}>
         <MetricCard label="Payroll (piece rate)" value={inr(totals.pay)} icon={Wallet} tone="navy" />
         <MetricCard label="Petrol allowance" value={inr(totals.petrol)} icon={Fuel} tone="amber" />
@@ -1910,12 +2008,13 @@ function SalaryPage({ employees, entries, rates }) {
 
       <div className="edm-card edm-scroll" style={{ overflowX: 'auto' }}>
         <table className="edm-table">
-          <thead><tr><th>Employee</th><th>Company</th><th>Method</th><th>Working days</th><th>Delivered</th><th>Payroll</th><th>Petrol</th><th>Total salary</th></tr></thead>
+          <thead><tr><th>Employee</th><th>Company</th><th>Status</th><th>Method</th><th>Working days</th><th>Delivered</th><th>Payroll</th><th>Petrol</th><th>Total salary</th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.id}>
                 <td style={{ fontWeight: 600 }}>{r.name}</td>
                 <td>{r.company}</td>
+                <td><StatusBadge status={r.status} /></td>
                 <td>{findSalaryStructure(rates, r.salaryMethod).label || '—'}</td>
                 <td className="font-mono">{r.days}</td>
                 <td className="font-mono">{r.delivered}</td>
@@ -1924,7 +2023,7 @@ function SalaryPage({ employees, entries, rates }) {
                 <td className="font-mono" style={{ fontWeight: 700 }}>{inr(r.total)}</td>
               </tr>
             ))}
-            {rows.length === 0 && <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 24 }}>No employees in this view.</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 24 }}>No employees in this view.</td></tr>}
           </tbody>
         </table>
       </div>
