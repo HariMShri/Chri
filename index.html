@@ -770,6 +770,11 @@ function GlobalStyle() {
       .edm-menu-btn { display:none; }
       .edm-sidebar-backdrop { display:none; }
 
+      /* Chart wrappers: fixed desktop heights replaced with a class that shrinks on small screens */
+      .chart-box { width:100%; height:240px; min-width:0; }
+      @media (max-width: 768px) { .chart-box { height:200px; } }
+      @media (max-width: 400px) { .chart-box { height:170px; } }
+
       /* Tablet: collapse the widest grids to 2 columns, shrink page padding a little */
       @media (max-width: 1024px) {
         .edm-main[style] { padding:22px 20px !important; }
@@ -800,13 +805,25 @@ function GlobalStyle() {
         .edm-root [style*="grid-template-columns"] { grid-template-columns:1fr !important; }
         .edm-root .payslip-sheet[style] { padding:18px !important; }
 
+        /* Let grid/flex children shrink instead of forcing their parent to overflow */
+        .edm-root [style*="display: grid"] > *,
+        .edm-root [style*="display: flex"] > * { min-width:0; }
+
+        /* Dense single-line rows (filter bars, report header actions, stat rows) should wrap
+           instead of squeezing charts/tables below them off-screen */
+        .edm-root [style*="justify-content: space-between"] { flex-wrap:wrap; row-gap:8px; }
+
         .edm-table th, .edm-table td { padding:8px 10px; font-size:12.5px; }
+        /* Text columns wrap instead of forcing horizontal expansion; numeric/mono columns
+           (amounts, dates, ids) stay on one line since wrapping those hurts readability */
+        .edm-table th, .edm-table td:not(.font-mono) { white-space:normal; word-break:break-word; vertical-align:top; }
+        .edm-table td.font-mono { white-space:nowrap; }
         h1.font-display[style], h2.font-display[style] { font-size:18px !important; }
 
         /* Shrink cards, metrics and buttons so nothing overflows a phone width */
-        .edm-card[style*="padding: 16px 18px"] { padding:12px 14px !important; }
-        .edm-card .font-display[style*="fontSize: 24"],
-        .edm-card .font-display[style*="fontSize:24"] { font-size:19px !important; }
+        .edm-card[style*="padding: 18px"] { padding:14px !important; }
+        .edm-card[style*="padding: 16px"] { padding:12px !important; }
+        .edm-card .font-display[style*="font-size: 24"] { font-size:19px !important; }
         .edm-btn { font-size:12.5px; padding:7px 11px; }
         .edm-tab { padding:7px 12px; font-size:12.5px; }
         .edm-label { font-size:11px; }
@@ -1002,7 +1019,7 @@ function DashboardPage({ employees, entries, empById, rates }) {
             <h3 className="font-display" style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>Revenue vs expense trend</h3>
             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>This month, by day</span>
           </div>
-          <div style={{ height: 240 }}>
+          <div className="chart-box">
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={trend} margin={{ left: -10, right: 10 }}>
                 <CartesianGrid stroke="#EEF0F2" vertical={false} />
@@ -1616,7 +1633,7 @@ function RevenuePage({ company, employees, entries, empById, rates }) {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16, marginBottom: 20 }}>
         <div className="edm-card" style={{ padding: 18 }}>
           <h3 className="font-display" style={{ fontSize: 15, fontWeight: 700, margin: '0 0 12px' }}>Revenue trend</h3>
-          <div style={{ height: 220 }}>
+          <div className="chart-box">
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={trend} margin={{ left: -10, right: 10 }}>
                 <CartesianGrid stroke="#EEF0F2" vertical={false} />
@@ -2105,7 +2122,7 @@ function ReportPage({ level, employees, entries, empById, rates }) {
           <h3 className="font-display" style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>Deliveries and profit trend</h3>
           <RouteProgress percent={overall.successRate} width={110} />
         </div>
-        <div style={{ height: 230 }}>
+        <div className="chart-box">
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={trend} margin={{ left: -10, right: 10 }}>
               <CartesianGrid stroke="#EEF0F2" vertical={false} />
