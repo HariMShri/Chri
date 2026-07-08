@@ -444,7 +444,7 @@ function buildTrend(entriesList, empById, rates, start, end) {
 /* ---------------------------------- seed data ---------------------------------- */
 
 function seedEmployees() {
-  return [
+  const base = [
     { id: 'e1', name: 'Dineshkumar V', mobile: '', address: '', joiningDate: '2026-05-21', company: 'Evargo Services', salaryMethod: 'method1', status: 'Active' },
     { id: 'e2', name: 'Prem Shankar', mobile: '', address: '', joiningDate: '2026-05-21', company: 'Quick Transfer', salaryMethod: 'method1', status: 'Inactive' },
     { id: 'e3', name: 'Jeeva Prasanna', mobile: '', address: '', joiningDate: '2026-05-21', company: 'Quick Transfer', salaryMethod: 'method1', status: 'Inactive' },
@@ -466,6 +466,8 @@ function seedEmployees() {
     { id: 'e19', name: 'Deepesh', mobile: '', address: '', joiningDate: '2026-07-04', company: 'Quick Transfer', salaryMethod: 'method1', status: 'Active' },
     { id: 'e20', name: 'Manikanadan', mobile: '', address: '', joiningDate: '2026-07-05', company: 'Quick Transfer', salaryMethod: 'method1', status: 'Active' },
   ];
+  // Bank / UPI payout details default to blank until the admin fills them in via Edit employee.
+  return base.map((e) => ({ bankAccountName: '', bankAccountNumber: '', bankIfsc: '', upiId: '', ...e }));
 }
 
 function seedEntries(employees) {
@@ -879,6 +881,67 @@ function StatusBadge({ status }) {
     : <span className="edm-badge edm-badge-inactive"><XCircle size={11} /> Inactive</span>;
 }
 
+/* ---------------------------------- Payout / bank-UPI helpers ---------------------------------- */
+
+// True once an employee has at least one payout route on file (UPI or full bank details).
+function hasPayoutDetails(e) {
+  if (!e) return false;
+  if (e.upiId) return true;
+  return !!(e.bankAccountNumber && e.bankIfsc);
+}
+
+function maskAccountNumber(num) {
+  if (!num) return '';
+  const s = String(num);
+  if (s.length <= 4) return s;
+  return `•••• ${s.slice(-4)}`;
+}
+
+// Compact cell: shows UPI ID if present, otherwise a masked bank account with a reveal toggle.
+// Used in both Employee management and Salary management tables so payout info reads the same way everywhere.
+function BankCell({ employee }) {
+  const [revealed, setRevealed] = useState(false);
+  if (!hasPayoutDetails(employee)) {
+    return <span style={{ color: 'var(--text-muted)', fontSize: 12.5 }}>Not on file</span>;
+  }
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      {employee.upiId ? (
+        <span className="font-mono" style={{ fontSize: 12.5 }}>{employee.upiId}</span>
+      ) : (
+        <span className="font-mono" style={{ fontSize: 12.5 }}>
+          {revealed ? employee.bankAccountNumber : maskAccountNumber(employee.bankAccountNumber)}
+        </span>
+      )}
+      {!employee.upiId && employee.bankAccountNumber && (
+        <button
+          type="button"
+          className="edm-btn edm-btn-ghost"
+          style={{ padding: 4 }}
+          onClick={() => setRevealed((v) => !v)}
+          title={revealed ? 'Hide account number' : 'Show account number'}
+        >
+          {revealed ? <EyeOff size={12} /> : <Eye size={12} />}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Builds a standard UPI deep link (upi://pay?...). Tapping it on a phone opens whichever UPI app
+// (GPay, PhonePe, Paytm, BHIM, bank apps) the employee/admin has installed, with the amount and
+// payee already filled in — the admin still confirms the payment with their own UPI PIN.
+function buildUpiLink({ upiId, payeeName, amount, note }) {
+  const params = new URLSearchParams({
+    pa: upiId,
+    pn: payeeName || '',
+    am: Number(amount || 0).toFixed(2),
+    cu: 'INR',
+    tn: note || 'Salary payment',
+  });
+  return `upi://pay?${params.toString()}`;
+}
+
 function useUndoToast(duration = 6000) {
   const [toast, setToast] = useState(null); // { message, onUndo }
   const timeoutRef = useRef(null);
@@ -1078,7 +1141,7 @@ function DashboardPage({ employees, entries, empById, rates }) {
 /* ---------------------------------- Employee Management page ---------------------------------- */
 
 function emptyEmployeeForm(salaryStructures, companies) {
-  return { id: '', name: '', mobile: '', address: '', joiningDate: toISO(today()), company: companies?.[0] || '', salaryMethod: salaryStructures?.[0]?.id || '', status: 'Active' };
+  return { id: '', name: '', mobile: '', address: '', joiningDate: toISO(today()), company: companies?.[0] || '', salaryMethod: salaryStructures?.[0]?.id || '', status: 'Active', bankAccountName: '', bankAccountNumber: '', bankIfsc: '', upiId: '' };
 }
 
 function EmployeeForm({ initial, salaryStructures, onSave, onClose }) {
@@ -1134,6 +1197,47 @@ function EmployeeForm({ initial, salaryStructures, onSave, onClose }) {
           ))}
         </div>
       </div>
+
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginTop: 4 }}>
+        <label className="edm-label" style={{ marginBottom: 8 }}>Bank / UPI details (for salary disbursement)</label>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+          <div>
+            <label className="edm-label">Account holder name</label>
+            <input className="edm-input" value={form.bankAccountName || ''} onChange={(e) => set('bankAccountName', e.target.value)} placeholder="As per bank record" />
+          </div>
+          <div>
+            <label className="edm-label">UPI ID</label>
+            <input className="edm-input" value={form.upiId || ''} onChange={(e) => set('upiId', e.target.value.trim())} placeholder="name@bank" />
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div>
+            <label className="edm-label">Account number</label>
+            <input
+              className="edm-input font-mono"
+              value={form.bankAccountNumber || ''}
+              onChange={(e) => set('bankAccountNumber', e.target.value.replace(/[^\dA-Za-z]/g, ''))}
+              placeholder="Bank account number"
+              inputMode="numeric"
+            />
+          </div>
+          <div>
+            <label className="edm-label">IFSC code</label>
+            <input
+              className="edm-input font-mono"
+              value={form.bankIfsc || ''}
+              onChange={(e) => set('bankIfsc', e.target.value.toUpperCase().slice(0, 11))}
+              placeholder="e.g. HDFC0001234"
+              style={form.bankIfsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(form.bankIfsc) ? { borderColor: 'var(--danger)' } : undefined}
+            />
+          </div>
+        </div>
+        {form.bankIfsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(form.bankIfsc) && (
+          <p style={{ fontSize: 11.5, color: 'var(--danger)', margin: '4px 0 0' }}>IFSC should look like HDFC0001234 (4 letters, 0, 6 alphanumeric).</p>
+        )}
+        <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '8px 0 0' }}>Provide either a UPI ID or full bank details — whichever this employee prefers for payout.</p>
+      </div>
+
       <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
         <button
           className="edm-btn edm-btn-amber"
@@ -1218,13 +1322,14 @@ function EmployeesPage({ employees, setEmployees, empById, entries, rates }) {
   };
 
   const exportEmployeesCsv = () => {
-    const header = ['ID', 'Name', 'Mobile', 'Address', 'Company', 'Salary method', 'Per delivery (₹)', 'Petrol / day (₹)', 'Joining date', 'Status', 'Delivered (this month)'];
+    const header = ['ID', 'Name', 'Mobile', 'Address', 'Company', 'Salary method', 'Per delivery (₹)', 'Petrol / day (₹)', 'Joining date', 'Status', 'Delivered (this month)', 'UPI ID', 'Bank account name', 'Bank account number', 'IFSC'];
     const rows = list.map((e) => {
       const s = salaryStructures.find((x) => x.id === e.salaryMethod);
       return [
         e.id, e.name, e.mobile, e.address, e.company,
         s ? s.label : '—', s ? s.perDelivery : '', s ? s.petrol : '',
         e.joiningDate, e.status, deliveredThisMonth(e.id),
+        e.upiId || '', e.bankAccountName || '', e.bankAccountNumber || '', e.bankIfsc || '',
       ];
     });
     downloadCsv(`employees_${toISO(today())}.csv`, [header, ...rows]);
@@ -1290,7 +1395,7 @@ function EmployeesPage({ employees, setEmployees, empById, entries, rates }) {
       <div className="edm-card edm-scroll" style={{ overflowX: 'auto' }}>
         <table className="edm-table">
           <thead><tr>
-            <th>ID</th><th>Name</th><th>Mobile</th><th>Company</th><th>Salary method</th><th>Joined</th><th>Status</th><th>Delivered (month)</th><th></th>
+            <th>ID</th><th>Name</th><th>Mobile</th><th>Company</th><th>Salary method</th><th>Bank / UPI</th><th>Joined</th><th>Status</th><th>Delivered (month)</th><th></th>
           </tr></thead>
           <tbody>
             {list.map((e) => (
@@ -1300,6 +1405,7 @@ function EmployeesPage({ employees, setEmployees, empById, entries, rates }) {
                 <td className="font-mono">{e.mobile}</td>
                 <td>{e.company}</td>
                 <td>{methodLabel(e.salaryMethod)}</td>
+                <td><BankCell employee={e} /></td>
                 <td>{e.joiningDate}</td>
                 <td><StatusBadge status={e.status} /></td>
                 <td className="font-mono">{deliveredThisMonth(e.id)}</td>
@@ -1311,7 +1417,7 @@ function EmployeesPage({ employees, setEmployees, empById, entries, rates }) {
                 </td>
               </tr>
             ))}
-            {list.length === 0 && <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 24 }}>No employees found.</td></tr>}
+            {list.length === 0 && <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 24 }}>No employees found.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -1962,6 +2068,8 @@ function SalaryPage({ employees, entries, rates }) {
   const [customEnd, setCustomEnd] = useState(toISO(today()));
   const [companyFilter, setCompanyFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
+  const [paidIds, setPaidIds] = useState(() => new Set()); // session-only "marked as paid" markers — see note below
+  const [payoutTarget, setPayoutTarget] = useState(null); // employee row currently open in the "Disburse" modal
 
   const [start, end] = getRange(preset, customStart, customEnd);
   const list = employees.filter((e) => (companyFilter === 'All' || e.company === companyFilter) && (statusFilter === 'All' || e.status === statusFilter));
@@ -1977,6 +2085,21 @@ function SalaryPage({ employees, entries, rates }) {
   });
 
   const totals = rows.reduce((acc, r) => ({ pay: acc.pay + r.pay, petrol: acc.petrol + r.petrol, total: acc.total + r.total, delivered: acc.delivered + r.delivered }), { pay: 0, petrol: 0, total: 0, delivered: 0 });
+
+  const markPaid = (id) => setPaidIds((prev) => new Set(prev).add(id));
+
+  // Exports a bank-portal-ready payout file: most Indian business/current accounts let you bulk-upload
+  // a CSV like this (Account No, IFSC, Name, Amount, Narration) to pay many employees via NEFT/IMPS in
+  // one batch, without needing a payment-gateway API integration.
+  const exportBankFile = () => {
+    const payable = rows.filter((r) => r.total > 0);
+    const header = ['Beneficiary name', 'Account number', 'IFSC', 'UPI ID', 'Amount (INR)', 'Narration'];
+    const csvRows = payable.map((r) => [
+      r.bankAccountName || r.name, r.bankAccountNumber || '', r.bankIfsc || '', r.upiId || '',
+      r.total.toFixed(2), `Salary ${preset}`,
+    ]);
+    downloadCsv(`salary_payout_${toISO(today())}.csv`, [header, ...csvRows]);
+  };
 
   return (
     <div>
@@ -2023,28 +2146,95 @@ function SalaryPage({ employees, entries, rates }) {
         ))}
       </div>
 
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+        <span className="edm-label" style={{ marginBottom: 0 }}>Payroll ({rows.length} employee{rows.length === 1 ? '' : 's'})</span>
+        <button className="edm-btn edm-btn-ghost" onClick={exportBankFile}><Download size={14} /> Export bank payout file (CSV)</button>
+      </div>
+
       <div className="edm-card edm-scroll" style={{ overflowX: 'auto' }}>
         <table className="edm-table">
-          <thead><tr><th>Employee</th><th>Company</th><th>Status</th><th>Method</th><th>Working days</th><th>Delivered</th><th>Payroll</th><th>Petrol</th><th>Total salary</th></tr></thead>
+          <thead><tr><th>Employee</th><th>Company</th><th>Status</th><th>Method</th><th>Salary rate</th><th>Working days</th><th>Delivered</th><th>Payroll</th><th>Petrol</th><th>Total salary</th><th>Bank / UPI</th><th>Payout</th></tr></thead>
           <tbody>
-            {rows.map((r) => (
+            {rows.map((r) => {
+              const structure = findSalaryStructure(rates, r.salaryMethod);
+              return (
               <tr key={r.id}>
                 <td style={{ fontWeight: 600 }}>{r.name}</td>
                 <td>{r.company}</td>
                 <td><StatusBadge status={r.status} /></td>
-                <td>{findSalaryStructure(rates, r.salaryMethod).label || '—'}</td>
+                <td>{structure.label || '—'}</td>
+                <td className="font-mono">₹{structure.perDelivery}/delivery{structure.petrol ? ` +₹${structure.petrol}/day` : ''}</td>
                 <td className="font-mono">{r.days}</td>
                 <td className="font-mono">{r.delivered}</td>
                 <td className="font-mono">{inr(r.pay)}</td>
                 <td className="font-mono">{inr(r.petrol)}</td>
                 <td className="font-mono" style={{ fontWeight: 700 }}>{inr(r.total)}</td>
+                <td><BankCell employee={r} /></td>
+                <td>
+                  {paidIds.has(r.id) ? (
+                    <span className="edm-badge edm-badge-active"><CheckCircle2 size={11} /> Paid</span>
+                  ) : (
+                    <button
+                      className="edm-btn edm-btn-ghost"
+                      style={{ padding: '5px 10px', fontSize: 12 }}
+                      disabled={r.total <= 0 || !hasPayoutDetails(r)}
+                      onClick={() => setPayoutTarget(r)}
+                    >
+                      Disburse
+                    </button>
+                  )}
+                </td>
               </tr>
-            ))}
-            {rows.length === 0 && <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 24 }}>No employees in this view.</td></tr>}
+              );
+            })}
+            {rows.length === 0 && <tr><td colSpan={12} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 24 }}>No employees in this view.</td></tr>}
           </tbody>
         </table>
       </div>
       </>
+      )}
+
+      {payoutTarget && (
+        <Modal title={`Pay ${payoutTarget.name}`} onClose={() => setPayoutTarget(null)} width={420}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div className="edm-card" style={{ padding: 14, fontSize: 13 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ color: 'var(--text-muted)' }}>Amount due</span>
+                <span className="font-mono" style={{ fontWeight: 700 }}>{inr(payoutTarget.total)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Payout route</span>
+                <BankCell employee={payoutTarget} />
+              </div>
+            </div>
+
+            {payoutTarget.upiId ? (
+              <a
+                className="edm-btn edm-btn-amber"
+                style={{ justifyContent: 'center' }}
+                href={buildUpiLink({ upiId: payoutTarget.upiId, payeeName: payoutTarget.bankAccountName || payoutTarget.name, amount: payoutTarget.total, note: `Salary ${preset}` })}
+              >
+                Open in UPI app to pay {inr(payoutTarget.total)}
+              </a>
+            ) : (
+              <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0 }}>
+                No UPI ID on file — use the bank details above for an NEFT/IMPS transfer from your banking app, or add this employee to the bank payout file export.
+              </p>
+            )}
+
+            <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: 0 }}>
+              This opens your own UPI app or bank portal to complete the transfer — Claude.ai can't move money directly.
+              "Mark as paid" is just a note for this screen and isn't a real payment confirmation.
+            </p>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="edm-btn edm-btn-primary" style={{ flex: 1, justifyContent: 'center' }} onClick={() => { markPaid(payoutTarget.id); setPayoutTarget(null); }}>
+                Mark as paid
+              </button>
+              <button className="edm-btn edm-btn-ghost" onClick={() => setPayoutTarget(null)}>Cancel</button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );
